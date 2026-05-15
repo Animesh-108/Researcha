@@ -1,0 +1,12 @@
+MetaTrader5>=5.0.4682
+pandas>=2.2.0
+pandas-ta>=0.4.67b0
+anthropic>=0.34.0
+python-telegram-bot>=20.7
+sqlalchemy>=2.0.23
+schedule>=1.2.1
+python-dotenv>=1.0.0
+psutil>=5.9.6
+requests>=2.31.0
+pytz>=2024.1
+numpy>=2.1.0
