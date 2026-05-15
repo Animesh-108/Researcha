@@ -35,8 +35,7 @@ CONFIG = {
     # SCAN SETTINGS
     # --------------------------------------------------------
     "scan_interval_minutes": 5,
-    "paper_trading": True,       # TRUE = log only, no real orders
-                                 # ALWAYS start True
+    "paper_trading": False,      # FALSE = Place actual trades on MT5 Demo account
 
     # --------------------------------------------------------
     # RISK MANAGEMENT — do not change these lightly
