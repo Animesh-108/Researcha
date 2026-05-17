@@ -61,7 +61,13 @@ class Executor:
             return {"success": False, "reason": slippage_reason}
 
         # Adjust SL/TP from new execution price if slipped
-        sl, tp = self._adjust_sl_tp(signal, exec_price, direction)
+        sl, tp = self._adjust_sl_tp(pair, signal, exec_price, direction)
+
+        # Enforce broker stop-distance + spread-safe SL/TP
+        ok, sl, tp, reason = self._enforce_stop_distance(pair, direction, exec_price, sl, tp)
+        if not ok:
+            logger.warning(f"{pair}: trade rejected — {reason}")
+            return {"success": False, "reason": reason}
 
         # ------------------------------------------------
         # Position sizing
@@ -220,7 +226,7 @@ class Executor:
     # Adjust SL/TP if price slipped
     # --------------------------------------------------------
 
-    def _adjust_sl_tp(self, signal, exec_price, direction):
+    def _adjust_sl_tp(self, pair, signal, exec_price, direction):
         """
         Keep SL and TP at same pip distance from new execution price.
         """
@@ -241,7 +247,67 @@ class Executor:
             sl = exec_price + sl_distance
             tp = exec_price - tp_distance
 
-        return round(sl, 5), round(tp, 5)
+        digits = self._get_digits(pair)
+        return round(sl, digits), round(tp, digits)
+
+    # --------------------------------------------------------
+    # Broker stop-distance & spread-safe SL/TP
+    # --------------------------------------------------------
+
+    def _enforce_stop_distance(self, pair, direction, exec_price, sl, tp):
+        if sl is None or tp is None:
+            return False, sl, tp, "SL/TP missing"
+
+        info = self.feed.get_symbol_info(pair)
+        digits = info.digits if info else 5
+        point  = info.point if info else (10 ** -digits)
+        stops_level = info.trade_stops_level if info else 0
+        min_distance = stops_level * point if stops_level else 0.0
+
+        # Ensure SL/TP on correct side of entry
+        if direction == "BUY" and (sl >= exec_price or tp <= exec_price):
+            return False, sl, tp, "SL/TP not on correct side for BUY"
+        if direction == "SELL" and (sl <= exec_price or tp >= exec_price):
+            return False, sl, tp, "SL/TP not on correct side for SELL"
+
+        # Enforce minimum broker distance from entry
+        if min_distance > 0:
+            if direction == "BUY":
+                sl = min(sl, exec_price - min_distance)
+                tp = max(tp, exec_price + min_distance)
+            else:
+                sl = max(sl, exec_price + min_distance)
+                tp = min(tp, exec_price - min_distance)
+
+        # Ensure SL/TP not inside current spread
+        bid = self.feed.get_bid(pair)
+        ask = self.feed.get_ask(pair)
+        if bid and ask:
+            if direction == "BUY":
+                if sl >= bid:
+                    sl = bid - (min_distance or point)
+                if tp <= ask:
+                    tp = ask + (min_distance or point)
+            else:
+                if sl <= ask:
+                    sl = ask + (min_distance or point)
+                if tp >= bid:
+                    tp = bid - (min_distance or point)
+
+        sl = round(sl, digits)
+        tp = round(tp, digits)
+
+        # Final sanity
+        if direction == "BUY" and (sl >= exec_price or tp <= exec_price):
+            return False, sl, tp, "SL/TP invalid after stop-distance enforcement"
+        if direction == "SELL" and (sl <= exec_price or tp >= exec_price):
+            return False, sl, tp, "SL/TP invalid after stop-distance enforcement"
+
+        return True, sl, tp, "OK"
+
+    def _get_digits(self, pair):
+        info = self.feed.get_symbol_info(pair)
+        return info.digits if info else 5
 
     # --------------------------------------------------------
     # Position sizing
